@@ -12,6 +12,7 @@ aws cloudformation deploy --stack-name ${STACK_NAME} --template-file ${TEMPLATE_
   --parameter-overrides \
   NameTagPrefix=${NameTagPrefix} \
   KeyName=${KeyName} \
+  AMIID=${AMIID} \
   GitHubRepositoryName=${GitHubRepositoryName} \
   GitHubAccountName=${GitHubAccountName} \
   GitHubSecret=${GitHubSecret} \

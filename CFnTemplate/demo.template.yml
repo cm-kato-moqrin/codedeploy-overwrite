@@ -13,7 +13,6 @@ Parameters:
     Type: AWS::EC2::KeyPair::KeyName
   AMIID:
     Description: 'Enter ami-id'
-    Default: ami-02047f9a52ce0cd19
     Type: String
   EC2Name:
     Description: Enter EC2 Tag Name.
