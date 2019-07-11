@@ -1,0 +1,39 @@
+{
+  "variables": {
+    "mfa_code": "000000"
+  },
+  "builders": [
+    {
+      "type": "amazon-ebs",
+      "ami_name": "demo-nginx-ami",
+      "region": "ap-northeast-1",
+      "source_ami_filter": {
+        "filters": {
+          "name": "amzn2-ami-hvm-*-x86_64-gp2"
+        },
+        "owners": ["137112412989"],
+        "most_recent": true
+      },
+      "instance_type": "t2.micro",
+      "ssh_username": "ec2-user",
+      "profile": "YOUR_PROFILE",
+      "mfa_code": "{{user `mfa_code`}}"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "inline": [
+        "sudo yum -y update",
+        "sudo yum install -y ruby",
+        "sudo yum install -y wget",
+        "sudo wget https://aws-codedeploy-ap-northeast-1.s3.ap-northeast-1.amazonaws.com/latest/install",
+        "sudo chmod +x ./install",
+        "sudo ./install auto",
+        "sudo amazon-linux-extras install nginx1.12",
+        "sudo systemctl enable nginx",
+        "sudo systemctl start nginx"
+      ]
+    }
+  ]
+}

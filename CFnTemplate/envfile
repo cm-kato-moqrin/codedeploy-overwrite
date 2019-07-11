@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# ProjectName
+export NameTagPrefix="demo"
+
+# AMI
+export AMIID="ami-xxxxxxxxxx"
+
+# KeyName
+export KeyName="YOUR_KEYNAME"
+
+# CodePipeline
+export GitHubRepositoryName=YOUR_GIT_REPOSITORY_NAME
+export GitHubAccountName=YOUR_GIT_ACCOUNT_NAME
+export GitHubSecret=SECRET
+export Branch=BRANCH_NAME
+export ApplicationName=Application
+export DeploymentGroupName=DeploymentGroup
+export PipelineName=CodePipeline

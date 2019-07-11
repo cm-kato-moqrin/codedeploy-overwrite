@@ -1,0 +1,465 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: EC2 Instance CodeDeploy Demo CodePipeline
+# ------------------------------------------------------------#
+# Parameters
+# ------------------------------------------------------------#
+Parameters:
+  NameTagPrefix:
+    Description: Prefix of Name tags.
+    Default: demo
+    Type: String
+  KeyName:
+    Description: Key Pair for EC2
+    Type: AWS::EC2::KeyPair::KeyName
+  AMIID:
+    Description: 'Enter ami-id'
+    Default: ami-02047f9a52ce0cd19
+    Type: String
+  EC2Name:
+    Description: Enter EC2 Tag Name.
+    Default: web
+    Type: String
+  GitHubRepositoryName:
+    Type: String
+  GitHubAccountName:
+    Type: String
+  GitHubSecret:
+    Type: String
+  Branch:
+    Type: String
+  ApplicationName:
+    Type: String
+  DeploymentGroupName:
+    Type: String
+  PipelineName:
+    Type: String
+# ------------------------------------------------------------#
+# Resources
+# ------------------------------------------------------------#
+Resources:
+  # EC2 Instanceに適用するIAMRole
+  CodeDeployRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+  RolePolicies:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: !Sub ${NameTagPrefix}-CodeDeployRolePolicy
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:Get*
+              - s3:List*
+            Resource: '*'
+      Roles:
+        - !Ref CodeDeployRole
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - !Ref CodeDeployRole
+  # ------------------------------------------------------------#
+  # VPC & NetWork & Subnets
+  # ------------------------------------------------------------#
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${NameTagPrefix}-vpc
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${NameTagPrefix}-igw
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, 'Fn::GetAZs': { Ref: 'AWS::Region' }]
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub ${NameTagPrefix}-PublicSubnet01
+  PublicSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, 'Fn::GetAZs': { Ref: 'AWS::Region' }]
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub ${NameTagPrefix}-PublicSubnet02
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: AttachGateway
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${NameTagPrefix}-public-RouteTable
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+  PublicSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+  # ------------------------------------------------------------#
+  # SecurityGroup
+  # ------------------------------------------------------------#
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${NameTagPrefix}-AppSecurityGroup
+      GroupDescription: !Sub ${NameTagPrefix}-AppSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${NameTagPrefix}-AppSecurityGroup
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: '0.0.0.0/0'
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${NameTagPrefix}-ALBSecurityGroup
+      GroupDescription: !Sub ${NameTagPrefix}-ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${NameTagPrefix}-ALBSecurityGroup
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: '0.0.0.0/0'
+  # ------------------------------------------------------------#
+  # EC2
+  # ------------------------------------------------------------#
+  FirstEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref KeyName
+      ImageId: !Ref AMIID
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Join:
+              - '-'
+              - - !Ref NameTagPrefix
+                - !Ref EC2Name
+                - '1'
+        - Key: Group
+          Value:
+            Fn::Join:
+              - '-'
+              - - !Ref NameTagPrefix
+                - !Ref EC2Name
+      IamInstanceProfile: !Ref InstanceProfile
+
+  SecondEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      KeyName: !Ref KeyName
+      ImageId: !Ref AMIID
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value:
+            Fn::Join:
+              - '-'
+              - - !Ref NameTagPrefix
+                - !Ref EC2Name
+                - '2'
+        - Key: Group
+          Value:
+            Fn::Join:
+              - '-'
+              - - !Ref NameTagPrefix
+                - !Ref EC2Name
+      IamInstanceProfile: !Ref InstanceProfile
+  EIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref FirstEC2
+  EIP2:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref SecondEC2
+  # ------------------------------------------------------------#
+  # ALB Log Bucket
+  # ------------------------------------------------------------#
+  S3LogBacket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${NameTagPrefix}-${AWS::AccountId}-log
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Name
+          Value: !Ref NameTagPrefix
+      LifecycleConfiguration:
+        Rules:
+          - Id: !Sub ${NameTagPrefix}-Log-Rules
+            Status: Enabled
+            ExpirationInDays: 365
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Sub ${NameTagPrefix}-${AWS::AccountId}-log
+      PolicyDocument:
+        Statement:
+          - Sid: 'LBLogWriteAccess'
+            Action:
+              - 's3:PutObject'
+            Effect: 'Allow'
+            Resource:
+              Fn::Join:
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Sub ${NameTagPrefix}-${AWS::AccountId}-log
+                  - '/*'
+            Principal:
+              AWS: '582318560864'
+  # # ------------------------------------------------------------#
+  # # ALB
+  # # ------------------------------------------------------------#
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${NameTagPrefix}-alb-tg
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      Targets:
+        - Id: !Ref FirstEC2
+          Port: 80
+        - Id: !Ref SecondEC2
+          Port: 80
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${NameTagPrefix}-alb
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: True
+        - Key: access_logs.s3.bucket
+          Value: !Sub '${NameTagPrefix}-${AWS::AccountId}-log'
+        - Key: access_logs.s3.prefix
+          Value: !Sub '${NameTagPrefix}-alb'
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Type: application
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+  # # ------------------------------------------------------------#
+  # # CodePipeline
+  # # ------------------------------------------------------------#
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Sub ${NameTagPrefix}-${ApplicationName}
+      ComputePlatform: Server
+
+  # CodeDeployに適用するIAMRole
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+
+  # CodePipelineに適用するIAMRole
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${NameTagPrefix}-CodePipelinePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplication
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                  - codebuild:StartBuild
+                  - codebuild:StopBuild
+                  - codebuild:BatchGet*
+                  - codebuild:Get*
+                  - codebuild:List*
+                  - s3:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - autoscaling:*
+                  - iam:PassRole
+
+  # S3Bucket
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+
+  # Webhook
+  PipelineWebhook:
+    Type: 'AWS::CodePipeline::Webhook'
+    Properties:
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken: !Ref GitHubSecret
+      Filters:
+        - JsonPath: '$.ref'
+          MatchEquals: 'refs/heads/{Branch}'
+      TargetPipeline: !Ref Pipeline
+      TargetAction: SourceAction
+      Name: GitHubPipelineWebhook
+      TargetPipelineVersion: !GetAtt Pipeline.Version
+      RegisterWithThirdParty: 'true'
+
+  CodeDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName: !Sub ${NameTagPrefix}-${ApplicationName}
+      AutoRollbackConfiguration:
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      DeploymentGroupName: !Sub ${NameTagPrefix}-${DeploymentGroupName}
+      DeploymentStyle:
+        DeploymentType: IN_PLACE
+        DeploymentOption: WITH_TRAFFIC_CONTROL
+      LoadBalancerInfo:
+        TargetGroupInfoList:
+          - Name: !Sub ${NameTagPrefix}-alb-tg
+      Ec2TagFilters:
+        - Key: Group
+          Value: !Sub ${NameTagPrefix}-web
+          Type: KEY_AND_VALUE
+      ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+
+  # CodePipeLine
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    DependsOn: TargetGroup
+    Properties:
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      Name: !Sub '${NameTagPrefix}-${PipelineName}'
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Owner: !Ref GitHubAccountName
+                Repo: !Ref GitHubRepositoryName
+                PollForSourceChanges: false
+                Branch: !Ref Branch
+                OAuthToken: '{{resolve:secretsmanager:GitHubOAuthToken:SecretString:GitHubOAuthToken}}'
+              RunOrder: 1
+              OutputArtifacts:
+                - Name: SourceOutput
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              InputArtifacts:
+                - Name: SourceOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CodeDeploy
+              Configuration:
+                ApplicationName: !Ref CodeDeployApplication
+                DeploymentGroupName: !Ref CodeDeploymentGroup
+              RunOrder: 1
