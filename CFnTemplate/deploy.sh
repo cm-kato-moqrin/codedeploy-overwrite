@@ -11,6 +11,7 @@ STACK_NAME=${NameTagPrefix}-codedeploy-stack
 aws cloudformation deploy --stack-name ${STACK_NAME} --template-file ${TEMPLATE_NAME} \
   --parameter-overrides \
   NameTagPrefix=${NameTagPrefix} \
+  KeyName=${KeyName} \
   GitHubRepositoryName=${GitHubRepositoryName} \
   GitHubAccountName=${GitHubAccountName} \
   GitHubSecret=${GitHubSecret} \
